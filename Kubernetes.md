@@ -1327,3 +1327,797 @@ spec:
 ### LimitRange
 
 ```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: resource-limits
+  namespace: dev
+spec:
+  limits:
+  - max:
+      cpu: "2"
+      memory: 4Gi
+    min:
+      cpu: "100m"
+      memory: 128Mi
+    default:
+      cpu: "500m"
+      memory: 512Mi
+    defaultRequest:
+      cpu: "250m"
+      memory: 256Mi
+    type: Container
+```
+
+---
+
+## 8. Helm - Kubernetes Package Manager
+
+### What is Helm?
+- **Package manager** for Kubernetes
+- Packages called **Charts**
+- Simplifies deployment of complex applications
+- Manages releases and rollbacks
+
+### Helm Architecture
+```
+Helm Client (CLI) → Kubernetes API Server → Deploy Resources
+```
+
+### Basic Helm Commands
+
+```bash
+# Add repository
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+# Search charts
+helm search repo nginx
+helm search hub wordpress
+
+# Install chart
+helm install myrelease bitnami/nginx
+helm install myrelease ./mychart
+helm install myrelease bitnami/nginx --namespace dev --create-namespace
+
+# List releases
+helm list
+helm list -A  # All namespaces
+
+# Get release info
+helm status myrelease
+helm get values myrelease
+helm get manifest myrelease
+
+# Upgrade release
+helm upgrade myrelease bitnami/nginx
+helm upgrade myrelease bitnami/nginx --set replicaCount=3
+
+# Rollback release
+helm rollback myrelease
+helm rollback myrelease 2  # To specific revision
+
+# Uninstall release
+helm uninstall myrelease
+
+# Create new chart
+helm create mychart
+
+# Package chart
+helm package mychart/
+
+# Lint chart
+helm lint mychart/
+
+# Template rendering (dry run)
+helm template myrelease ./mychart
+```
+
+### Helm Chart Structure
+
+```
+mychart/
+├── Chart.yaml          # Chart metadata
+├── values.yaml         # Default configuration values
+├── charts/             # Dependent charts
+├── templates/          # Kubernetes manifests templates
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── _helpers.tpl   # Template helpers
+│   └── NOTES.txt      # Post-install notes
+└── .helmignore        # Files to ignore
+```
+
+### Chart.yaml Example
+
+```yaml
+apiVersion: v2
+name: myapp
+description: A Helm chart for my application
+type: application
+version: 1.0.0
+appVersion: "1.0"
+keywords:
+  - web
+  - application
+maintainers:
+  - name: Your Name
+    email: your-email@example.com
+dependencies:
+  - name: postgresql
+    version: 11.x.x
+    repository: https://charts.bitnami.com/bitnami
+```
+
+### values.yaml Example
+
+```yaml
+replicaCount: 3
+
+image:
+  repository: myapp
+  tag: "1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env:
+  - name: DATABASE_URL
+    value: "postgres://db:5432"
+  - name: LOG_LEVEL
+    value: "info"
+```
+
+### Template Example (deployment.yaml)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.fullname" . }}
+  labels:
+    {{- include "mychart.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mychart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mychart.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        env:
+          {{- toYaml .Values.env | nindent 12 }}
+```
+
+### Installing with Custom Values
+
+```bash
+# Override values from command line
+helm install myrelease ./mychart --set replicaCount=5
+
+# Override with values file
+helm install myrelease ./mychart -f custom-values.yaml
+
+# Multiple values files
+helm install myrelease ./mychart -f values1.yaml -f values2.yaml
+```
+
+---
+
+## 9. Kubernetes Monitoring & Logging
+
+### Health Checks
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: healthcheck-pod
+spec:
+  containers:
+  - name: app
+    image: myapp:1.0
+    # Liveness Probe - restart if fails
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    
+    # Readiness Probe - remove from service if fails
+    readinessProbe:
+      httpGet:
+        path: /ready
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    
+    # Startup Probe - for slow starting apps
+    startupProbe:
+      httpGet:
+        path: /startup
+        port: 8080
+      initialDelaySeconds: 0
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 30
+```
+
+### Probe Types
+
+```yaml
+# HTTP GET Probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+    httpHeaders:
+    - name: Custom-Header
+      value: Awesome
+
+# TCP Socket Probe
+livenessProbe:
+  tcpSocket:
+    port: 8080
+
+# Command Probe
+livenessProbe:
+  exec:
+    command:
+    - cat
+    - /tmp/healthy
+
+# gRPC Probe (K8s 1.24+)
+livenessProbe:
+  grpc:
+    port: 9090
+```
+
+### Metrics Server
+
+```bash
+# Install metrics server
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# View resource usage
+kubectl top nodes
+kubectl top pods
+kubectl top pods -n kube-system
+kubectl top pod <pod-name> --containers
+```
+
+### Logging Architecture
+
+```yaml
+# Logging to stdout/stderr (recommended)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: logger-pod
+spec:
+  containers:
+  - name: app
+    image: busybox
+    command: ["/bin/sh"]
+    args: ["-c", "while true; do echo $(date) - Hello; sleep 10; done"]
+
+---
+# Sidecar logging pattern
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-logging
+spec:
+  containers:
+  - name: app
+    image: myapp:1.0
+    volumeMounts:
+    - name: logs
+      mountPath: /var/log/app
+  
+  - name: log-collector
+    image: fluentd:latest
+    volumeMounts:
+    - name: logs
+      mountPath: /var/log/app
+  
+  volumes:
+  - name: logs
+    emptyDir: {}
+```
+
+---
+
+## 10. Interview Questions & Answers
+
+### Basic Questions
+
+**Q: What is Kubernetes and why use it?**
+- Container orchestration platform
+- Automates deployment, scaling, and management
+- Benefits: High availability, scalability, self-healing, rolling updates
+
+**Q: Explain Kubernetes architecture**
+- **Control Plane**: API Server, etcd, Scheduler, Controller Manager
+- **Worker Nodes**: Kubelet, Kube-proxy, Container Runtime
+- **etcd**: Distributed key-value store for cluster state
+
+**Q: What is a Pod?**
+- Smallest deployable unit in K8s
+- Can contain one or more containers
+- Shares network namespace and storage
+- Has unique IP address
+
+**Q: Difference between Deployment and ReplicaSet?**
+- **ReplicaSet**: Maintains specified number of pod replicas
+- **Deployment**: Manages ReplicaSets, provides declarative updates, rolling updates, rollbacks
+
+**Q: Types of Kubernetes Services?**
+- **ClusterIP**: Internal cluster communication (default)
+- **NodePort**: Exposes on each node's IP
+- **LoadBalancer**: Cloud load balancer
+- **ExternalName**: DNS CNAME mapping
+
+**Q: What is a Namespace?**
+- Virtual cluster within physical cluster
+- Provides resource isolation
+- Multiple teams can share same cluster
+- Default namespaces: default, kube-system, kube-public, kube-node-lease
+
+### Intermediate Questions
+
+**Q: Explain ConfigMap vs Secret**
+- **ConfigMap**: Non-sensitive configuration data
+- **Secret**: Sensitive data (base64 encoded)
+- Both decouple configuration from container images
+- Secrets should be encrypted at rest in production
+
+**Q: What is StatefulSet and when to use it?**
+- For stateful applications (databases)
+- Provides stable network identities
+- Ordered deployment and scaling
+- Persistent storage per pod
+- Examples: MySQL, MongoDB, Kafka
+
+**Q: Difference between DaemonSet and Deployment?**
+- **DaemonSet**: Runs one pod per node
+- **Deployment**: Runs specified number of replicas across nodes
+- DaemonSet use cases: logging, monitoring, networking
+
+**Q: What is an Ingress?**
+- Manages external HTTP/HTTPS access
+- Provides routing, SSL termination, name-based virtual hosting
+- Requires Ingress Controller (nginx, traefik, etc.)
+
+**Q: Explain PersistentVolume and PersistentVolumeClaim**
+- **PV**: Cluster-level storage resource
+- **PVC**: User request for storage
+- PV is provisioned by admin or dynamically
+- PVC binds to PV based on requirements
+
+**Q: What is a Helm Chart?**
+- Package of Kubernetes resources
+- Contains templates and values
+- Simplifies complex application deployment
+- Version control and rollback support
+
+**Q: How does kubectl work?**
+- kubectl → API Server (REST) → etcd (stores state)
+- Authenticates and validates requests
+- Controller Manager watches for changes
+- Scheduler assigns pods to nodes
+
+### Advanced Questions
+
+**Q: Explain rolling update strategy**
+```yaml
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1        # Max new pods during update
+    maxUnavailable: 1  # Max unavailable pods
+```
+- Gradually replaces old pods with new ones
+- Zero downtime deployment
+- Can rollback if issues occur
+
+**Q: How to troubleshoot a CrashLoopBackOff?**
+```bash
+# Check pod status
+kubectl describe pod <pod-name>
+
+# View logs
+kubectl logs <pod-name>
+kubectl logs <pod-name> --previous
+
+# Check events
+kubectl get events --sort-by='.lastTimestamp'
+
+# Common causes:
+# - Application error
+# - Missing dependencies
+# - Incorrect command
+# - Resource limits
+# - Failed health checks
+```
+
+**Q: Explain init containers**
+```yaml
+spec:
+  initContainers:
+  - name: init-db
+    image: busybox
+    command: ['sh', '-c', 'until nslookup db; do sleep 2; done']
+  containers:
+  - name: app
+    image: myapp:1.0
+```
+- Run before main containers
+- Must complete successfully
+- Use cases: setup, wait for dependencies, migrations
+
+**Q: What is HPA and how does it work?**
+- Horizontal Pod Autoscaler
+- Scales pods based on metrics (CPU, memory, custom)
+- Queries Metrics Server every 15s (default)
+- Calculates desired replicas based on target utilization
+
+**Q: Explain Blue-Green Deployment in K8s**
+```yaml
+# Blue deployment (current)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: myapp
+      version: blue
+
+---
+# Green deployment (new)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-green
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: myapp
+      version: green
+
+---
+# Service (switch by changing selector)
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+spec:
+  selector:
+    app: myapp
+    version: blue  # Change to 'green' to switch
+```
+
+**Q: What are Kubernetes Operators?**
+- Extends K8s functionality
+- Encodes operational knowledge
+- Automates complex application management
+- Uses Custom Resource Definitions (CRDs)
+- Examples: Prometheus Operator, MySQL Operator
+
+**Q: Explain Network Policies**
+- Firewall rules for pods
+- Controls ingress/egress traffic
+- Pod-to-pod communication control
+- Requires CNI plugin support (Calico, Cilium)
+
+**Q: What is a Service Mesh?**
+- Infrastructure layer for service-to-service communication
+- Features: Load balancing, service discovery, encryption, observability
+- Popular: Istio, Linkerd
+- Uses sidecar pattern
+
+**Q: How to secure Kubernetes cluster?**
+1. RBAC for access control
+2. Network Policies for pod communication
+3. Pod Security Standards
+4. Encrypt secrets at rest
+5. Regular security audits
+6. Image scanning
+7. Limit resource usage
+8. Use non-root containers
+9. Enable audit logging
+10. Keep cluster updated
+
+**Q: Explain Kubernetes scheduling**
+1. User submits pod
+2. API Server validates and stores in etcd
+3. Scheduler watches for unscheduled pods
+4. Scheduler finds suitable node (filtering + scoring)
+5. Binds pod to node
+6. Kubelet creates containers
+
+**Q: What are Taints and Tolerations?**
+```yaml
+# Taint on node (prevents scheduling)
+kubectl taint nodes node1 key=value:NoSchedule
+
+# Toleration on pod (allows scheduling)
+spec:
+  tolerations:
+  - key: "key"
+    operator: "Equal"
+    value: "value"
+    effect: "NoSchedule"
+```
+- Taints: Mark nodes to repel pods
+- Tolerations: Allow pods on tainted nodes
+- Use cases: dedicated nodes, special hardware
+
+**Q: Explain Node Affinity**
+```yaml
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: disktype
+            operator: In
+            values:
+            - ssd
+```
+- Attracts pods to nodes with specific labels
+- Required vs Preferred
+- More expressive than nodeSelector
+
+---
+
+## 11. Kubernetes Best Practices
+
+### Resource Management
+```yaml
+# Always set resource requests and limits
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+```
+
+### Health Checks
+- Always define liveness and readiness probes
+- Use appropriate probe types
+- Set reasonable timeout and threshold values
+
+### Labels and Annotations
+```yaml
+metadata:
+  labels:
+    app: myapp
+    tier: backend
+    environment: production
+    version: v1.0
+  annotations:
+    description: "My application backend"
+    owner: "team-backend"
+```
+
+### Security
+- Run containers as non-root
+- Use read-only root filesystem
+- Drop unnecessary capabilities
+- Enable Pod Security Standards
+- Use RBAC for access control
+
+### High Availability
+- Run multiple replicas
+- Use Pod Disruption Budgets
+- Spread pods across zones
+- Configure resource quotas
+- Use horizontal pod autoscaling
+
+### Configuration Management
+- Use ConfigMaps for configuration
+- Use Secrets for sensitive data
+- Externalize environment-specific config
+- Version control your YAML files
+
+---
+
+## 12. Tools & Ecosystem
+
+### Essential Tools
+
+| Tool | Purpose |
+|------|---------|
+| **kubectl** | CLI for K8s |
+| **Helm** | Package manager |
+| **kustomize** | Template-free customization |
+| **k9s** | Terminal UI |
+| **lens** | Desktop UI |
+| **kubectx/kubens** | Context/namespace switching |
+| **stern** | Multi-pod log tailing |
+| **Prometheus** | Monitoring |
+| **Grafana** | Visualization |
+| **ELK/EFK** | Logging |
+| **Istio** | Service mesh |
+| **ArgoCD** | GitOps CD |
+| **Tekton** | CI/CD pipelines |
+
+### Useful kubectl Plugins
+
+```bash
+# Install krew (plugin manager)
+kubectl krew install ctx
+kubectl krew install ns
+kubectl krew install tree
+kubectl krew install resource-capacity
+
+# Usage
+kubectl ctx          # Switch context
+kubectl ns           # Switch namespace
+kubectl tree deploy nginx  # Show resource tree
+```
+
+---
+
+## 13. Hands-On Practice Tasks
+
+### Task 1: Deploy Multi-tier Application
+1. Create namespace
+2. Deploy database (StatefulSet)
+3. Deploy backend API (Deployment)
+4. Deploy frontend (Deployment)
+5. Create Services
+6. Configure Ingress
+7. Add ConfigMaps and Secrets
+8. Set up autoscaling
+
+### Task 2: Implement Rolling Update
+1. Deploy application v1
+2. Expose via Service
+3. Update to v2
+4. Monitor rollout
+5. Rollback if needed
+
+### Task 3: Configure Monitoring
+1. Deploy Metrics Server
+2. Check resource usage
+3. Configure HPA
+4. Test autoscaling
+5. View metrics
+
+### Task 4: Troubleshoot Issues
+1. Create failing pod
+2. Investigate with describe
+3. Check logs
+4. Fix and redeploy
+
+---
+
+## 14. Common Issues & Solutions
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| ImagePullBackOff | Image not found | Check image name/tag, registry access |
+| CrashLoopBackOff | Application crash | Check logs, fix application |
+| Pending pod | No resources | Check node resources, add nodes |
+| Service not accessible | Wrong selector | Verify service selector matches pod labels |
+| ConfigMap not updating | No restart | Restart pods or use reloader |
+| PVC pending | No PV available | Create PV or configure StorageClass |
+
+---
+
+## 15. Quick Reference Commands
+
+```bash
+# Cluster
+kubectl cluster-info
+kubectl get nodes
+kubectl describe node <node>
+
+# Pods
+kubectl get pods -o wide
+kubectl describe pod <pod>
+kubectl logs -f <pod>
+kubectl exec -it <pod> -- bash
+kubectl delete pod <pod>
+
+# Deployments
+kubectl create deployment <name> --image=<image>
+kubectl get deployments
+kubectl scale deployment <name> --replicas=3
+kubectl rollout status deployment/<name>
+kubectl rollout undo deployment/<name>
+
+# Services
+kubectl expose deployment <name> --port=80
+kubectl get services
+kubectl describe service <name>
+
+# ConfigMaps & Secrets
+kubectl create configmap <name> --from-literal=key=value
+kubectl create secret generic <name> --from-literal=key=value
+kubectl get configmaps
+kubectl get secrets
+
+# Namespaces
+kubectl create namespace <name>
+kubectl get namespaces
+kubectl config set-context --current --namespace=<name>
+
+# Debugging
+kubectl top nodes
+kubectl top pods
+kubectl get events --sort-by='.lastTimestamp'
+kubectl describe <resource> <name>
+
+# Apply/Delete
+kubectl apply -f file.yaml
+kubectl delete -f file.yaml
+kubectl apply -f directory/
+```
+
+---
+
+## Resources for Learning
+
+- **Official Documentation**: kubernetes.io/docs
+- **Interactive Tutorial**: kubernetes.io/docs/tutorials
+- **Playground**: play-with-k8s.com
+- **Practice**: katacoda.com/courses/kubernetes
+- **Certification**: CKAD, CKA, CKS
+
+Good luck with your Kubernetes journey! 🚀
